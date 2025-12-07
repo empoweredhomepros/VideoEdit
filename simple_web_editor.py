@@ -122,41 +122,76 @@ def extract_and_concat_segments(input_path, segments, output_path):
             subprocess.run(cmd, capture_output=True, check=True)
             segment_files.append(seg_path)
 
-        # Build crossfade filter (0.1 second crossfades for smooth transitions)
-        fade_duration = 0.1
+        # Build crossfade filter for all segments
+        fade_duration = 0.15  # Slightly longer fade for smoother transitions
 
-        # Build the filter for 2 segments (simpler approach)
-        if len(segment_files) == 2:
-            # Get duration of first segment
+        # Get durations of all segments
+        durations = []
+        for seg_file in segment_files:
             result = subprocess.run([
                 'ffprobe', '-v', 'error',
                 '-show_entries', 'format=duration',
                 '-of', 'default=noprint_wrappers=1:nokey=1',
-                segment_files[0]
+                seg_file
             ], capture_output=True, text=True)
-            dur0 = float(result.stdout.strip())
+            durations.append(float(result.stdout.strip()))
 
-            offset = dur0 - fade_duration
+        # Build input arguments
+        input_args = []
+        for seg in segment_files:
+            input_args.extend(['-i', seg])
 
-            cmd = [
-                'ffmpeg', '-y',
-                '-i', segment_files[0],
-                '-i', segment_files[1],
-                '-filter_complex',
-                f'[0:v][1:v]xfade=transition=fade:duration={fade_duration}:offset={offset}[vout];'
-                f'[0:a][1:a]acrossfade=d={fade_duration}[aout]',
-                '-map', '[vout]',
-                '-map', '[aout]',
-                '-c:v', 'libx264', '-preset', 'fast', '-crf', '18',
-                '-c:a', 'aac', '-b:a', '192k',
-                '-movflags', '+faststart',
-                '-loglevel', 'error',
-                output_path
-            ]
-            result = subprocess.run(cmd, capture_output=True, text=True)
+        # Build the xfade chain for video
+        video_filter = ""
+        audio_filter = ""
+        offset = 0
 
-            if result.returncode == 0:
-                return
+        for i in range(len(segment_files) - 1):
+            offset += durations[i] - fade_duration
+
+            if i == 0:
+                # First crossfade
+                video_filter = f"[0:v][1:v]xfade=transition=fade:duration={fade_duration}:offset={offset}"
+                audio_filter = f"[0:a][1:a]acrossfade=d={fade_duration}"
+
+                if len(segment_files) > 2:
+                    video_filter += "[vt0]"
+                    audio_filter += "[at0]"
+                else:
+                    video_filter += "[vout]"
+                    audio_filter += "[aout]"
+            else:
+                # Subsequent crossfades
+                video_filter += f";[vt{i-1}][{i+1}:v]xfade=transition=fade:duration={fade_duration}:offset={offset}"
+                audio_filter += f";[at{i-1}][{i+1}:a]acrossfade=d={fade_duration}"
+
+                if i < len(segment_files) - 2:
+                    video_filter += f"[vt{i}]"
+                    audio_filter += f"[at{i}]"
+                else:
+                    video_filter += "[vout]"
+                    audio_filter += "[aout]"
+
+        filter_complex = video_filter + ";" + audio_filter
+
+        # Try with crossfade
+        cmd = [
+            'ffmpeg', '-y'
+        ] + input_args + [
+            '-filter_complex', filter_complex,
+            '-map', '[vout]',
+            '-map', '[aout]',
+            '-c:v', 'libx264', '-preset', 'fast', '-crf', '18',
+            '-c:a', 'aac', '-b:a', '192k',
+            '-movflags', '+faststart',
+            '-loglevel', 'error',
+            output_path
+        ]
+
+        result = subprocess.run(cmd, capture_output=True, text=True)
+
+        if result.returncode == 0:
+            return
 
         # Fallback: simple concatenation without crossfade
         concat_path = os.path.join(tmpdir, 'concat.txt')
