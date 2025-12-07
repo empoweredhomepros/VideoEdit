@@ -48,7 +48,7 @@ def get_duration(video_path):
     result = subprocess.run(cmd, capture_output=True, text=True)
     return float(result.stdout.strip())
 
-def calculate_keep_segments(silences, duration, buffer=0.15):
+def calculate_keep_segments(silences, duration, buffer=0.1):
     """Calculate which segments to keep (inverse of silence)."""
     if not silences:
         return [(0, duration)]
@@ -60,12 +60,13 @@ def calculate_keep_segments(silences, duration, buffer=0.15):
         if silence_end is None:
             silence_end = duration
 
-        # Add buffer for smoother transitions
+        # Add small buffer for smoother transitions (reduced from 0.15 to 0.1)
         adjusted_start = silence_start + buffer
         adjusted_end = silence_end - buffer
 
-        # Only cut if meaningful silence remains after buffering
-        if adjusted_end <= adjusted_start:
+        # Only cut if meaningful silence remains after buffering (at least 0.3s)
+        if adjusted_end - adjusted_start < 0.3:
+            # Silence too short after buffering, skip cutting it
             continue
 
         if adjusted_start > current_pos:
@@ -88,13 +89,16 @@ def extract_and_concat_segments(input_path, segments, output_path):
             duration = end - start
 
             # Extract segment with both video and audio
+            # Use -avoid_negative_ts to prevent timestamp issues
             cmd = [
                 'ffmpeg', '-y',
+                '-ss', str(start),  # Seek before input for faster processing
                 '-i', input_path,
-                '-ss', str(start),
                 '-t', str(duration),
                 '-c:v', 'libx264', '-preset', 'fast', '-crf', '18',
                 '-c:a', 'aac', '-b:a', '192k',
+                '-avoid_negative_ts', 'make_zero',
+                '-fflags', '+genpts',  # Generate presentation timestamps
                 '-loglevel', 'error',
                 seg_path
             ]
@@ -107,11 +111,13 @@ def extract_and_concat_segments(input_path, segments, output_path):
             for seg_path in segment_files:
                 f.write(f"file '{seg_path}'\n")
 
-        # Concatenate all segments
+        # Concatenate all segments with proper settings to avoid black frames
         cmd = [
             'ffmpeg', '-y', '-f', 'concat', '-safe', '0',
             '-i', concat_path,
-            '-c', 'copy',
+            '-c:v', 'libx264', '-preset', 'fast', '-crf', '18',  # Re-encode to ensure smoothness
+            '-c:a', 'aac', '-b:a', '192k',
+            '-movflags', '+faststart',  # Better for playback
             '-loglevel', 'error',
             output_path
         ]
