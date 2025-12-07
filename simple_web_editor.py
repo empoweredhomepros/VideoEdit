@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 from flask import Flask, render_template, request, jsonify, send_file
 from werkzeug.utils import secure_filename
-import os, tempfile, subprocess, shutil
+import os, tempfile, subprocess, shutil, re
 from pathlib import Path
 
 app = Flask(__name__)
@@ -14,6 +14,108 @@ upload_sessions = {}
 
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+
+def detect_silence(video_path, threshold_db=-40, min_duration=0.5):
+    """Detect silent sections using FFmpeg."""
+    cmd = [
+        'ffmpeg', '-i', video_path,
+        '-af', f'silencedetect=noise={threshold_db}dB:d={min_duration}',
+        '-f', 'null', '-'
+    ]
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    stderr = result.stderr
+
+    silence_starts = re.findall(r'silence_start: ([\d.]+)', stderr)
+    silence_ends = re.findall(r'silence_end: ([\d.]+)', stderr)
+
+    silences = []
+    for i, start in enumerate(silence_starts):
+        if i < len(silence_ends):
+            silences.append((float(start), float(silence_ends[i])))
+        else:
+            silences.append((float(start), None))
+
+    return silences
+
+def get_duration(video_path):
+    """Get video duration in seconds."""
+    cmd = [
+        'ffprobe', '-v', 'error',
+        '-show_entries', 'format=duration',
+        '-of', 'default=noprint_wrappers=1:nokey=1',
+        video_path
+    ]
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    return float(result.stdout.strip())
+
+def calculate_keep_segments(silences, duration, buffer=0.15):
+    """Calculate which segments to keep (inverse of silence)."""
+    if not silences:
+        return [(0, duration)]
+
+    keep_segments = []
+    current_pos = 0.0
+
+    for silence_start, silence_end in silences:
+        if silence_end is None:
+            silence_end = duration
+
+        # Add buffer for smoother transitions
+        adjusted_start = silence_start + buffer
+        adjusted_end = silence_end - buffer
+
+        # Only cut if meaningful silence remains after buffering
+        if adjusted_end <= adjusted_start:
+            continue
+
+        if adjusted_start > current_pos:
+            keep_segments.append((current_pos, adjusted_start))
+
+        current_pos = adjusted_end
+
+    if current_pos < duration:
+        keep_segments.append((current_pos, duration))
+
+    return keep_segments
+
+def extract_and_concat_segments(input_path, segments, output_path):
+    """Extract video segments and concatenate them (keeps audio and video in sync)."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        segment_files = []
+
+        for i, (start, end) in enumerate(segments):
+            seg_path = os.path.join(tmpdir, f'seg_{i:04d}.mp4')
+            duration = end - start
+
+            # Extract segment with both video and audio
+            cmd = [
+                'ffmpeg', '-y',
+                '-i', input_path,
+                '-ss', str(start),
+                '-t', str(duration),
+                '-c:v', 'libx264', '-preset', 'fast', '-crf', '18',
+                '-c:a', 'aac', '-b:a', '192k',
+                '-loglevel', 'error',
+                seg_path
+            ]
+            subprocess.run(cmd, capture_output=True, check=True)
+            segment_files.append(seg_path)
+
+        # Create concat file
+        concat_path = os.path.join(tmpdir, 'concat.txt')
+        with open(concat_path, 'w') as f:
+            for seg_path in segment_files:
+                f.write(f"file '{seg_path}'\n")
+
+        # Concatenate all segments
+        cmd = [
+            'ffmpeg', '-y', '-f', 'concat', '-safe', '0',
+            '-i', concat_path,
+            '-c', 'copy',
+            '-loglevel', 'error',
+            output_path
+        ]
+        subprocess.run(cmd, capture_output=True, check=True)
 
 @app.route('/')
 def index():
@@ -63,7 +165,7 @@ def process_videos():
         input_files = [f['path'] for f in session_files]
 
     try:
-        # Merge videos
+        # Step 1: Merge videos
         merged_path = os.path.join(app.config['OUTPUT_FOLDER'], f'{session_id}_merged.mp4')
         concat_file = os.path.join(app.config['OUTPUT_FOLDER'], f'{session_id}_concat.txt')
 
@@ -81,36 +183,26 @@ def process_videos():
 
         os.remove(concat_file)
 
-        # Get duration
-        result = subprocess.run([
-            'ffprobe', '-v', 'error',
-            '-show_entries', 'format=duration',
-            '-of', 'default=noprint_wrappers=1:nokey=1',
-            merged_path
-        ], capture_output=True, text=True)
-        duration = float(result.stdout.strip())
+        # Step 2: Get duration
+        duration = get_duration(merged_path)
 
-        # Simple silence removal using FFmpeg
+        # Step 3: Detect silence
+        silences = detect_silence(merged_path, threshold_db=-40, min_duration=0.5)
+
+        # Step 4: Calculate segments to keep
+        keep_segments = calculate_keep_segments(silences, duration, buffer=0.15)
+
+        if not keep_segments:
+            return jsonify({'error': 'No content detected after silence removal'}), 400
+
+        # Step 5: Extract and concatenate segments (video + audio together)
         output_path = os.path.join(app.config['OUTPUT_FOLDER'], f'{session_id}_final.mp4')
-
-        subprocess.run([
-            'ffmpeg', '-y', '-i', merged_path,
-            '-af', 'silenceremove=start_periods=1:start_duration=0.5:start_threshold=-40dB:detection=peak,silenceremove=stop_periods=-1:stop_duration=0.5:stop_threshold=-40dB:detection=peak',
-            '-c:v', 'copy',
-            '-loglevel', 'error',
-            output_path
-        ], check=True)
+        extract_and_concat_segments(merged_path, keep_segments, output_path)
 
         os.remove(merged_path)
 
-        # Get new duration
-        result = subprocess.run([
-            'ffprobe', '-v', 'error',
-            '-show_entries', 'format=duration',
-            '-of', 'default=noprint_wrappers=1:nokey=1',
-            output_path
-        ], capture_output=True, text=True)
-        new_duration = float(result.stdout.strip())
+        # Step 6: Get new duration
+        new_duration = get_duration(output_path)
         removed = max(0, duration - new_duration)
 
         return jsonify({
@@ -122,7 +214,7 @@ def process_videos():
                 'edited_duration': round(new_duration, 2),
                 'removed_duration': round(removed, 2),
                 'removed_percent': round(100 * removed / duration, 1) if duration > 0 else 0,
-                'segments_count': 1
+                'segments_count': len(keep_segments)
             }
         })
 
@@ -142,4 +234,7 @@ if __name__ == '__main__':
     print('📱 Open your browser to: http://127.0.0.1:8000')
     print('Press Ctrl+C to stop')
     print('=' * 50)
+    print()
+    print('✅ This version cuts BOTH video and audio to keep them in sync!')
+    print()
     app.run(debug=True, host='127.0.0.1', port=8000)
