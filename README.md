@@ -4,17 +4,36 @@ Automatically merge and edit multiple video clips with intelligent silence remov
 
 Perfect for combining short recordings (like 8-second clips) into one polished video with all silence trimmed out.
 
-## Quick Start
+## 🌐 Web Interface (Recommended)
+
+The easiest way to use the editor is through the browser interface:
 
 ```bash
 # 1. Install dependencies
-pip install torch
+pip install -r requirements.txt
 
 # 2. Make sure you have FFmpeg installed
 brew install ffmpeg  # macOS
 # or: sudo apt install ffmpeg  # Linux
 
-# 3. Run the editor
+# 3. Start the web server
+python3 web_editor.py
+
+# 4. Open your browser to http://localhost:5000
+```
+
+**Features:**
+- 📤 Drag-and-drop file upload
+- 🔄 Reorder clips by dragging
+- ⚙️ Adjust settings with sliders
+- ⬇️ Download processed video
+- 📊 See before/after statistics
+
+## 💻 Command-Line Interface
+
+For advanced users or automation:
+
+```bash
 python3 execution/multi_clip_editor.py --input-dir ./my_clips --output final.mp4
 ```
 

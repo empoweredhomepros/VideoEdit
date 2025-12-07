@@ -1,0 +1,632 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Multi-Clip Video Editor</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 16px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            overflow: hidden;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+
+        .header h1 {
+            font-size: 28px;
+            margin-bottom: 10px;
+        }
+
+        .header p {
+            opacity: 0.9;
+            font-size: 14px;
+        }
+
+        .content {
+            padding: 30px;
+        }
+
+        .upload-area {
+            border: 3px dashed #667eea;
+            border-radius: 12px;
+            padding: 60px 20px;
+            text-align: center;
+            background: #f8f9ff;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .upload-area:hover {
+            border-color: #764ba2;
+            background: #f0f2ff;
+        }
+
+        .upload-area.dragover {
+            border-color: #764ba2;
+            background: #e8ebff;
+            transform: scale(1.02);
+        }
+
+        .upload-icon {
+            font-size: 48px;
+            margin-bottom: 20px;
+        }
+
+        .upload-text {
+            font-size: 18px;
+            color: #667eea;
+            font-weight: 600;
+            margin-bottom: 10px;
+        }
+
+        .upload-hint {
+            font-size: 14px;
+            color: #666;
+        }
+
+        .file-list {
+            margin-top: 30px;
+        }
+
+        .file-item {
+            background: #f8f9ff;
+            padding: 15px 20px;
+            border-radius: 8px;
+            margin-bottom: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            cursor: move;
+            transition: all 0.2s ease;
+        }
+
+        .file-item:hover {
+            background: #f0f2ff;
+            transform: translateX(5px);
+        }
+
+        .file-item.dragging {
+            opacity: 0.5;
+        }
+
+        .file-info {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+
+        .file-number {
+            background: #667eea;
+            color: white;
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 600;
+            font-size: 14px;
+        }
+
+        .file-name {
+            font-weight: 500;
+            color: #333;
+        }
+
+        .file-size {
+            color: #999;
+            font-size: 13px;
+        }
+
+        .remove-btn {
+            background: #ff4757;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 13px;
+            transition: all 0.2s ease;
+        }
+
+        .remove-btn:hover {
+            background: #ff3838;
+        }
+
+        .settings {
+            background: #f8f9ff;
+            padding: 20px;
+            border-radius: 12px;
+            margin-top: 30px;
+        }
+
+        .settings h3 {
+            color: #667eea;
+            margin-bottom: 20px;
+            font-size: 18px;
+        }
+
+        .setting-group {
+            margin-bottom: 15px;
+        }
+
+        .setting-group label {
+            display: block;
+            color: #333;
+            font-weight: 500;
+            margin-bottom: 8px;
+            font-size: 14px;
+        }
+
+        .setting-group input[type="range"] {
+            width: 100%;
+            height: 6px;
+            border-radius: 3px;
+            background: #ddd;
+            outline: none;
+            -webkit-appearance: none;
+        }
+
+        .setting-group input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 18px;
+            height: 18px;
+            border-radius: 50%;
+            background: #667eea;
+            cursor: pointer;
+        }
+
+        .setting-group input[type="range"]::-moz-range-thumb {
+            width: 18px;
+            height: 18px;
+            border-radius: 50%;
+            background: #667eea;
+            cursor: pointer;
+            border: none;
+        }
+
+        .setting-value {
+            display: inline-block;
+            background: white;
+            padding: 4px 12px;
+            border-radius: 6px;
+            font-weight: 600;
+            color: #667eea;
+            margin-left: 10px;
+            min-width: 60px;
+            text-align: center;
+        }
+
+        .btn {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 16px 32px;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            width: 100%;
+            margin-top: 30px;
+            transition: all 0.3s ease;
+        }
+
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 20px rgba(102, 126, 234, 0.4);
+        }
+
+        .btn:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .status {
+            margin-top: 20px;
+            padding: 15px;
+            border-radius: 8px;
+            text-align: center;
+            font-weight: 500;
+        }
+
+        .status.processing {
+            background: #fff3cd;
+            color: #856404;
+        }
+
+        .status.success {
+            background: #d4edda;
+            color: #155724;
+        }
+
+        .status.error {
+            background: #f8d7da;
+            color: #721c24;
+        }
+
+        .stats {
+            background: #f8f9ff;
+            padding: 20px;
+            border-radius: 12px;
+            margin-top: 20px;
+        }
+
+        .stats h4 {
+            color: #667eea;
+            margin-bottom: 15px;
+        }
+
+        .stat-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 8px 0;
+            border-bottom: 1px solid #e0e0e0;
+        }
+
+        .stat-row:last-child {
+            border-bottom: none;
+        }
+
+        .stat-label {
+            color: #666;
+            font-size: 14px;
+        }
+
+        .stat-value {
+            font-weight: 600;
+            color: #333;
+        }
+
+        .download-btn {
+            background: #28a745;
+            margin-top: 15px;
+        }
+
+        .download-btn:hover {
+            background: #218838;
+        }
+
+        .hidden {
+            display: none;
+        }
+
+        .loader {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #667eea;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 20px auto;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🎬 Multi-Clip Video Editor</h1>
+            <p>Upload clips, auto-merge, and remove silence with AI</p>
+        </div>
+
+        <div class="content">
+            <!-- Upload Area -->
+            <div id="uploadArea" class="upload-area">
+                <div class="upload-icon">📁</div>
+                <div class="upload-text">Drop video clips here or click to browse</div>
+                <div class="upload-hint">Supports MP4, MOV, AVI, MKV, WebM</div>
+                <input type="file" id="fileInput" accept="video/*" multiple style="display: none;">
+            </div>
+
+            <!-- File List -->
+            <div id="fileListContainer" class="hidden">
+                <div class="file-list">
+                    <h3 style="color: #667eea; margin-bottom: 15px;">📋 Your Clips (drag to reorder)</h3>
+                    <div id="fileList"></div>
+                </div>
+
+                <!-- Settings -->
+                <div class="settings">
+                    <h3>⚙️ Settings</h3>
+
+                    <div class="setting-group">
+                        <label>
+                            Silence Threshold:
+                            <span class="setting-value" id="silenceValue">0.5s</span>
+                        </label>
+                        <input type="range" id="minSilence" min="0.2" max="1.0" step="0.1" value="0.5">
+                        <div style="font-size: 12px; color: #666; margin-top: 5px;">
+                            Remove pauses longer than this (0.3s=aggressive, 0.5s=balanced, 0.8s=gentle)
+                        </div>
+                    </div>
+
+                    <div class="setting-group">
+                        <label>
+                            Padding:
+                            <span class="setting-value" id="paddingValue">100ms</span>
+                        </label>
+                        <input type="range" id="padding" min="50" max="300" step="50" value="100">
+                        <div style="font-size: 12px; color: #666; margin-top: 5px;">
+                            Breathing room around speech (100ms=natural, 200ms=spacious)
+                        </div>
+                    </div>
+                </div>
+
+                <button id="processBtn" class="btn">✨ Process Videos</button>
+            </div>
+
+            <!-- Status Messages -->
+            <div id="status" class="hidden"></div>
+
+            <!-- Results -->
+            <div id="results" class="hidden">
+                <div class="stats">
+                    <h4>📊 Results</h4>
+                    <div class="stat-row">
+                        <span class="stat-label">Original Duration:</span>
+                        <span class="stat-value" id="originalDuration">-</span>
+                    </div>
+                    <div class="stat-row">
+                        <span class="stat-label">Edited Duration:</span>
+                        <span class="stat-value" id="editedDuration">-</span>
+                    </div>
+                    <div class="stat-row">
+                        <span class="stat-label">Removed:</span>
+                        <span class="stat-value" id="removedDuration">-</span>
+                    </div>
+                    <div class="stat-row">
+                        <span class="stat-label">Speech Segments:</span>
+                        <span class="stat-value" id="segmentsCount">-</span>
+                    </div>
+                </div>
+                <button id="downloadBtn" class="btn download-btn">⬇️ Download Edited Video</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let uploadedFiles = [];
+        let sessionId = null;
+
+        const uploadArea = document.getElementById('uploadArea');
+        const fileInput = document.getElementById('fileInput');
+        const fileListContainer = document.getElementById('fileListContainer');
+        const fileList = document.getElementById('fileList');
+        const processBtn = document.getElementById('processBtn');
+        const status = document.getElementById('status');
+        const results = document.getElementById('results');
+        const minSilenceInput = document.getElementById('minSilence');
+        const paddingInput = document.getElementById('padding');
+        const silenceValue = document.getElementById('silenceValue');
+        const paddingValue = document.getElementById('paddingValue');
+
+        // Upload area events
+        uploadArea.addEventListener('click', () => fileInput.click());
+        uploadArea.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            uploadArea.classList.add('dragover');
+        });
+        uploadArea.addEventListener('dragleave', () => {
+            uploadArea.classList.remove('dragover');
+        });
+        uploadArea.addEventListener('drop', (e) => {
+            e.preventDefault();
+            uploadArea.classList.remove('dragover');
+            handleFiles(e.dataTransfer.files);
+        });
+
+        fileInput.addEventListener('change', (e) => {
+            handleFiles(e.target.files);
+        });
+
+        // Settings sliders
+        minSilenceInput.addEventListener('input', (e) => {
+            silenceValue.textContent = e.target.value + 's';
+        });
+
+        paddingInput.addEventListener('input', (e) => {
+            paddingValue.textContent = e.target.value + 'ms';
+        });
+
+        // Process button
+        processBtn.addEventListener('click', processVideos);
+
+        function handleFiles(files) {
+            const formData = new FormData();
+            for (let file of files) {
+                formData.append('files[]', file);
+            }
+
+            showStatus('Uploading files...', 'processing');
+
+            fetch('/upload', {
+                method: 'POST',
+                body: formData
+            })
+            .then(res => res.json())
+            .then(data => {
+                sessionId = data.session_id;
+                uploadedFiles = data.files;
+                renderFileList();
+                fileListContainer.classList.remove('hidden');
+                status.classList.add('hidden');
+            })
+            .catch(err => {
+                showStatus('Upload failed: ' + err.message, 'error');
+            });
+        }
+
+        function renderFileList() {
+            fileList.innerHTML = '';
+            uploadedFiles.forEach((file, index) => {
+                const item = document.createElement('div');
+                item.className = 'file-item';
+                item.draggable = true;
+                item.dataset.index = index;
+
+                item.innerHTML = `
+                    <div class="file-info">
+                        <div class="file-number">${index + 1}</div>
+                        <div>
+                            <div class="file-name">${file.name}</div>
+                            <div class="file-size">${formatBytes(file.size)}</div>
+                        </div>
+                    </div>
+                    <button class="remove-btn" onclick="removeFile(${index})">Remove</button>
+                `;
+
+                // Drag and drop for reordering
+                item.addEventListener('dragstart', handleDragStart);
+                item.addEventListener('dragover', handleDragOver);
+                item.addEventListener('drop', handleDrop);
+                item.addEventListener('dragend', handleDragEnd);
+
+                fileList.appendChild(item);
+            });
+        }
+
+        let draggedIndex = null;
+
+        function handleDragStart(e) {
+            draggedIndex = parseInt(e.target.dataset.index);
+            e.target.classList.add('dragging');
+        }
+
+        function handleDragOver(e) {
+            e.preventDefault();
+        }
+
+        function handleDrop(e) {
+            e.preventDefault();
+            const dropIndex = parseInt(e.target.closest('.file-item').dataset.index);
+
+            if (draggedIndex !== dropIndex) {
+                const draggedFile = uploadedFiles[draggedIndex];
+                uploadedFiles.splice(draggedIndex, 1);
+                uploadedFiles.splice(dropIndex, 0, draggedFile);
+                renderFileList();
+            }
+        }
+
+        function handleDragEnd(e) {
+            e.target.classList.remove('dragging');
+        }
+
+        function removeFile(index) {
+            uploadedFiles.splice(index, 1);
+            if (uploadedFiles.length === 0) {
+                fileListContainer.classList.add('hidden');
+            } else {
+                renderFileList();
+            }
+        }
+
+        function processVideos() {
+            if (!sessionId || uploadedFiles.length === 0) {
+                showStatus('Please upload some videos first', 'error');
+                return;
+            }
+
+            processBtn.disabled = true;
+            results.classList.add('hidden');
+            showStatus('Processing videos... This may take a minute.', 'processing');
+
+            const fileOrder = uploadedFiles.map(f => f.name);
+
+            fetch('/process', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    session_id: sessionId,
+                    file_order: fileOrder,
+                    min_silence: parseFloat(minSilenceInput.value),
+                    min_speech: 0.25,
+                    padding: parseInt(paddingInput.value),
+                    merge_gap: 0.3
+                })
+            })
+            .then(res => res.json())
+            .then(data => {
+                processBtn.disabled = false;
+
+                if (data.error) {
+                    showStatus('Error: ' + data.error, 'error');
+                } else {
+                    showStatus('✅ Processing complete!', 'success');
+                    showResults(data);
+                }
+            })
+            .catch(err => {
+                processBtn.disabled = false;
+                showStatus('Processing failed: ' + err.message, 'error');
+            });
+        }
+
+        function showResults(data) {
+            const stats = data.stats;
+            document.getElementById('originalDuration').textContent = formatDuration(stats.original_duration);
+            document.getElementById('editedDuration').textContent = formatDuration(stats.edited_duration);
+            document.getElementById('removedDuration').textContent =
+                formatDuration(stats.removed_duration) + ` (${stats.removed_percent}%)`;
+            document.getElementById('segmentsCount').textContent = stats.segments_count;
+
+            const downloadBtn = document.getElementById('downloadBtn');
+            downloadBtn.onclick = () => {
+                window.location.href = data.download_url;
+            };
+
+            results.classList.remove('hidden');
+        }
+
+        function showStatus(message, type) {
+            status.textContent = message;
+            status.className = 'status ' + type;
+            status.classList.remove('hidden');
+        }
+
+        function formatBytes(bytes) {
+            if (bytes === 0) return '0 Bytes';
+            const k = 1024;
+            const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return Math.round(bytes / Math.pow(k, i) * 100) / 100 + ' ' + sizes[i];
+        }
+
+        function formatDuration(seconds) {
+            const mins = Math.floor(seconds / 60);
+            const secs = Math.floor(seconds % 60);
+            return `${mins}:${secs.toString().padStart(2, '0')} (${seconds.toFixed(1)}s)`;
+        }
+    </script>
+</body>
+</html>
