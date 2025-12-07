@@ -48,7 +48,7 @@ def get_duration(video_path):
     result = subprocess.run(cmd, capture_output=True, text=True)
     return float(result.stdout.strip())
 
-def calculate_keep_segments(silences, duration, buffer=0.2):
+def calculate_keep_segments(silences, duration, buffer=0.1):
     """Calculate which segments to keep (inverse of silence)."""
     if not silences:
         return [(0, duration)]
@@ -60,12 +60,12 @@ def calculate_keep_segments(silences, duration, buffer=0.2):
         if silence_end is None:
             silence_end = duration
 
-        # Add buffer for smoother transitions
+        # Add small buffer for transitions
         adjusted_start = silence_start + buffer
         adjusted_end = silence_end - buffer
 
-        # Only cut if meaningful silence remains after buffering (at least 0.5s)
-        if adjusted_end - adjusted_start < 0.5:
+        # Only cut if meaningful silence remains after buffering (at least 0.3s)
+        if adjusted_end - adjusted_start < 0.3:
             # Silence too short after buffering, skip cutting it
             continue
 
@@ -80,15 +80,33 @@ def calculate_keep_segments(silences, duration, buffer=0.2):
     return keep_segments
 
 def extract_and_concat_segments(input_path, segments, output_path):
-    """Extract video segments and concatenate them (keeps audio and video in sync)."""
+    """Extract video segments and concatenate with smooth crossfades."""
+
+    if len(segments) == 1:
+        # Single segment, just extract it
+        start, end = segments[0]
+        cmd = [
+            'ffmpeg', '-y',
+            '-ss', str(start),
+            '-i', input_path,
+            '-t', str(end - start),
+            '-c:v', 'libx264', '-preset', 'fast', '-crf', '18',
+            '-c:a', 'aac', '-b:a', '192k',
+            '-movflags', '+faststart',
+            '-loglevel', 'error',
+            output_path
+        ]
+        subprocess.run(cmd, capture_output=True, check=True)
+        return
+
     with tempfile.TemporaryDirectory() as tmpdir:
         segment_files = []
 
+        # Extract each segment
         for i, (start, end) in enumerate(segments):
             seg_path = os.path.join(tmpdir, f'seg_{i:04d}.mp4')
             duration = end - start
 
-            # Extract segment with both video and audio
             cmd = [
                 'ffmpeg', '-y',
                 '-ss', str(start),
@@ -104,13 +122,48 @@ def extract_and_concat_segments(input_path, segments, output_path):
             subprocess.run(cmd, capture_output=True, check=True)
             segment_files.append(seg_path)
 
-        # Create concat file
+        # Build crossfade filter (0.1 second crossfades for smooth transitions)
+        fade_duration = 0.1
+
+        # Build the filter for 2 segments (simpler approach)
+        if len(segment_files) == 2:
+            # Get duration of first segment
+            result = subprocess.run([
+                'ffprobe', '-v', 'error',
+                '-show_entries', 'format=duration',
+                '-of', 'default=noprint_wrappers=1:nokey=1',
+                segment_files[0]
+            ], capture_output=True, text=True)
+            dur0 = float(result.stdout.strip())
+
+            offset = dur0 - fade_duration
+
+            cmd = [
+                'ffmpeg', '-y',
+                '-i', segment_files[0],
+                '-i', segment_files[1],
+                '-filter_complex',
+                f'[0:v][1:v]xfade=transition=fade:duration={fade_duration}:offset={offset}[vout];'
+                f'[0:a][1:a]acrossfade=d={fade_duration}[aout]',
+                '-map', '[vout]',
+                '-map', '[aout]',
+                '-c:v', 'libx264', '-preset', 'fast', '-crf', '18',
+                '-c:a', 'aac', '-b:a', '192k',
+                '-movflags', '+faststart',
+                '-loglevel', 'error',
+                output_path
+            ]
+            result = subprocess.run(cmd, capture_output=True, text=True)
+
+            if result.returncode == 0:
+                return
+
+        # Fallback: simple concatenation without crossfade
         concat_path = os.path.join(tmpdir, 'concat.txt')
         with open(concat_path, 'w') as f:
             for seg_path in segment_files:
                 f.write(f"file '{seg_path}'\n")
 
-        # Concatenate all segments
         cmd = [
             'ffmpeg', '-y', '-f', 'concat', '-safe', '0',
             '-i', concat_path,
@@ -191,11 +244,11 @@ def process_videos():
         # Step 2: Get duration
         duration = get_duration(merged_path)
 
-        # Step 3: Detect silence (only cut pauses of 1+ seconds for smoother result)
-        silences = detect_silence(merged_path, threshold_db=-40, min_duration=1.0)
+        # Step 3: Detect silence (cut 0.5s+ pauses)
+        silences = detect_silence(merged_path, threshold_db=-40, min_duration=0.5)
 
-        # Step 4: Calculate segments to keep (with bigger buffer for smoother cuts)
-        keep_segments = calculate_keep_segments(silences, duration, buffer=0.2)
+        # Step 4: Calculate segments to keep
+        keep_segments = calculate_keep_segments(silences, duration, buffer=0.1)
 
         if not keep_segments:
             return jsonify({'error': 'No content detected after silence removal'}), 400
